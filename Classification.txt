@@ -1,0 +1,135 @@
+import numpy as np 
+import pandas as pd 
+import seaborn as sns
+import matplotlib.pyplot as plt
+from IPython.display import Image
+import os
+
+!pip install opencv-python
+import cv2
+from tensorflow.keras.layers import Dense, Flatten, Conv2D, MaxPool2D, GlobalAveragePooling2D, Dropout
+from tensorflow.keras.models import Sequential, Model
+from tensorflow.keras.applications.xception import Xception
+from tensorflow.keras.optimizers import Adam
+
+data1 = pd.read_csv('train.csv') 
+ship = {0: 'Cargo', 1:'Military', 2:'Carrier', 3:'Cruise', 4:'Tankers'}
+data1['category'] = data1['category'] - 1
+data1['label'] = data1['category'].map(ship)
+data1['label']  = pd.Categorical(data1['label'])
+data1.head(5) 
+data1.shape
+data1['label'].value_counts() 
+path = 'images'
+
+os.listdir(path)
+img_list = list(data1['image'])
+data_img = []
+
+for each in img_list:
+    each_path = os.path.join(path, each)
+    each_img = cv2.imread(each_path)
+    each_img = cv2.cvtColor(each_img, cv2.COLOR_BGR2RGB)
+    each_img_resized = cv2.resize(each_img, (126,126))
+    data_img.append(each_img_resized)
+X = np.array(data_img)
+
+from sklearn.preprocessing import OneHotEncoder
+
+y = OneHotEncoder(dtype='int8', sparse=False).fit_transform(data1['category'].values.reshape(-1,1))
+
+train_images = np.random.randint(0,6252,4) 
+i = 1
+plt.figure(figsize=(20,10))
+for each in train_images:
+    plt.subplot(1,4,i)
+    i += 1
+    plt.xticks([])
+    plt.yticks([])
+    plt.title(data1['label'].loc[each])
+    plt.imshow(X[each])
+	
+from sklearn.model_selection import train_test_split
+
+X_data, X_test, y_data, y_test = train_test_split(X, y, test_size=0.15, random_state=45)
+X_train, X_val, y_train, y_val = train_test_split(X_data, y_data, test_size=0.15, random_state=45)
+print('X_train: ', X_train.shape)
+print('y_train: ', y_train.shape)
+print('X_val: ', X_val.shape)
+print('y_val: ', y_val.shape)
+print('X_test: ', X_test.shape)
+print('y_test: ', y_test.shape)
+
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+train_gen = ImageDataGenerator(horizontal_flip=True,
+                               rotation_range = 42,
+                               zoom_range=0.2,
+                               height_shift_range = 0.5,
+                               width_shift_range = 0.5)
+train_gen.fit(X_train)
+validation_gen = ImageDataGenerator(horizontal_flip=True,
+                               rotation_range = 42,
+                               zoom_range=0.2,
+                               height_shift_range = 0.5,
+                               width_shift_range = 0.5)
+validation_gen.fit(X_val)
+
+batch_size = 100
+epochs = 20
+base = Xception(include_top=False, weights='imagenet', input_shape=(126,126,3))
+x = base.output
+x = GlobalAveragePooling2D()(x)
+head = Dense(5, activation='softmax')(x)
+model = Model(inputs=base.input, outputs=head)
+
+model.compile(optimizer=Adam(lr=0.0001), 
+              loss = 'categorical_crossentropy', 
+              metrics=['accuracy'])
+model12 = model.fit_generator(train_gen.flow(X_train, y_train, batch_size=batch_size),
+                              epochs = epochs,
+                              validation_data = validation_gen.flow(X_val, y_val, batch_size=batch_size),
+                              steps_per_epoch = X_train.shape[0] // batch_size)
+
+test_img = pd.read_csv('test.csv')
+test_img.head(5)
+
+sample_img = test_img.sample(10)
+img_list = list(sample_img['image'])
+sample_img_data = []
+
+for each in img_list:
+    each_path = os.path.join(path, each)
+    each_img = cv2.imread(each_path)
+    each_img = cv2.cvtColor(each_img, cv2.COLOR_BGR2RGB)
+    each_img_resized = cv2.resize(each_img, (126,126))
+    sample_img_data.append(each_img_resized)
+sample_img_data = np.array(sample_img_data)
+
+sample_pred = model.predict(sample_img_data)
+sample_classes = np.argmax(sample_pred, axis = 1)
+y_pred = model.predict(X_test)
+y_pred_classes = np.argmax(y_pred, axis = 1)
+y_test_classes = np.argmax(y_test, axis = 1)
+test_images = np.random.randint(0,6252,4) 
+i = 1
+plt.figure(figsize=(20,10))
+for each in test_images:
+    plt.subplot(1,4,i)
+    i += 1
+    plt.xticks([])
+    plt.yticks([])
+    plt.title(data1['image'].loc[each])
+    plt.imshow(X[each])
+	
+i = 0
+plt.figure(figsize=(20,14))
+for each in range(10):
+    i += 1
+    plt.subplot(2,5,i)
+    plt.xlabel(str(ship[sample_classes[each]]))
+    plt.imshow(sample_img_data[each])
+    plt.xticks([])
+    plt.yticks([])	
+
+from sklearn.metrics import classification_report
+print(classification_report(y_test_classes, y_pred_classes))
